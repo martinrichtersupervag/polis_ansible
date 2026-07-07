@@ -1,0 +1,125 @@
+---
+- name: Kompilace a instalace FastDDS a závislostí
+  hosts: ep
+  become: yes
+  vars:
+    base_dir: /opt/polis_deps
+
+  tasks:
+    - name: Vytvoření pracovního adresáře
+      ansible.builtin.file:
+        path: "{{ base_dir }}"
+        state: directory
+        mode: '0755'
+
+    # -------------------------------------------------------------------------
+    # KROK A: Fast CDR
+    # -------------------------------------------------------------------------
+    - name: Klonování repozitáře Fast-CDR
+      ansible.builtin.git:
+        repo: https://github.com/eProsima/Fast-CDR.git
+        dest: "{{ base_dir }}/Fast-CDR"
+        recursive: yes
+        version: HEAD
+
+    - name: Vytvoření build adresáře pro Fast-CDR
+      ansible.builtin.file:
+        path: "{{ base_dir }}/Fast-CDR/build"
+        state: directory
+
+    - name: Konfigurace, kompilace a instalace Fast-CDR
+      ansible.builtin.shell: |
+        cmake ..
+        make -j$(nproc)
+        make install
+      args:
+        chdir: "{{ base_dir }}/Fast-CDR/build"
+        creates: /usr/local/lib/libfastcdr.so
+
+    # -------------------------------------------------------------------------
+    # KROK B1: Foonathan Memory
+    # -------------------------------------------------------------------------
+    - name: Klonování repozitáře Foonathan Memory
+      ansible.builtin.git:
+        repo: https://github.com/foonathan/memory.git
+        dest: "{{ base_dir }}/memory"
+        version: HEAD
+
+    - name: Vytvoření build adresáře pro Foonathan Memory
+      ansible.builtin.file:
+        path: "{{ base_dir }}/memory/build"
+        state: directory
+
+    - name: Konfigurace, kompilace a instalace Foonathan Memory
+      ansible.builtin.shell: |
+        cmake .. -DFOONATHAN_MEMORY_BUILD_TOOLS=OFF -DFOONATHAN_MEMORY_BUILD_TESTS=OFF
+        make -j$(nproc)
+        make install
+      args:
+        chdir: "{{ base_dir }}/memory/build"
+        creates: /usr/local/lib/libfoonathan_memory-0.7.4.a
+
+    - name: Načtení knihoven (ldconfig 1)
+      ansible.builtin.command: ldconfig
+
+    # -------------------------------------------------------------------------
+    # KROK B2: Fast DDS
+    # -------------------------------------------------------------------------
+    - name: Klonování repozitáře Fast-DDS
+      ansible.builtin.git:
+        repo: https://github.com/eProsima/Fast-DDS.git
+        dest: "{{ base_dir }}/Fast-DDS"
+        recursive: yes
+        version: HEAD
+
+    - name: Vytvoření build adresáře pro Fast-DDS
+      ansible.builtin.file:
+        path: "{{ base_dir }}/Fast-DDS/build"
+        state: directory
+
+    - name: Konfigurace, kompilace a instalace Fast-DDS
+      ansible.builtin.shell: |
+        cmake .. -DCOMPILE_TOOLS=ON
+        make -j$(nproc)
+        make install
+      args:
+        chdir: "{{ base_dir }}/Fast-DDS/build"
+        creates: /usr/local/bin/fastdds
+
+    - name: Načtení knihoven (ldconfig 2)
+      ansible.builtin.command: ldconfig
+
+    # -------------------------------------------------------------------------
+    # KROK C: Fast DDS Gen
+    # -------------------------------------------------------------------------
+    - name: Klonování repozitáře Fast-DDS-Gen
+      ansible.builtin.git:
+        repo: https://github.com/eProsima/Fast-DDS-Gen.git
+        dest: "{{ base_dir }}/Fast-DDS-Gen"
+        recursive: yes
+        version: HEAD
+
+    - name: Sestavení Fast-DDS-Gen pomocí Gradle
+      ansible.builtin.command:
+        cmd: ./gradlew assemble
+        chdir: "{{ base_dir }}/Fast-DDS-Gen"
+        creates: "{{ base_dir }}/Fast-DDS-Gen/share/fastddsgen/java/fastddsgen.jar"
+
+    - name: Vytvoření čistého wrapper skriptu pro fastddsgen
+      ansible.builtin.copy:
+        dest: /usr/local/bin/fastddsgen
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          java -jar {{ base_dir }}/Fast-DDS-Gen/share/fastddsgen/java/fastddsgen.jar "$@"
+
+    - name: Finální načtení knihoven a ověření verze
+      ansible.builtin.shell: |
+        ldconfig
+        fastddsgen -version
+      register: fastddsgen_version
+      changed_when: false
+
+    - name: Výpis verze fastddsgen pro kontrolu
+      ansible.builtin.debug:
+        msg: "{{ fastddsgen_version.stdout }}"

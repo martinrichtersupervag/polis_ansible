@@ -1,0 +1,51 @@
+---
+- name: Sestaveni aplikace Polis DDS pod rootem
+  hosts: ep
+  become: yes
+  vars:
+    app_dir: "/opt/polis-dds-master"
+
+  tasks:
+    - name: Klonovani repozitare polis-dds-master
+      ansible.builtin.git:
+        repo: 'git@github.com:martinrichtersupervag/polis-dds-master'
+        dest: "{{ app_dir }}"
+        version: FastDDS
+        accept_hostkey: yes
+        force: yes 
+
+    - name: Inicializace a aktualizace submodulu
+      ansible.builtin.command:
+        cmd: git submodule update --init --recursive
+        chdir: "{{ app_dir }}"
+
+    - name: Prepnuti submodulu IDL_FILES na vetev PrismTech
+      ansible.builtin.command:
+        cmd: git checkout PrismTech
+        chdir: "{{ app_dir }}/IDL_FILES"
+
+    - name: Nastaveni prav pro spusteni generacniho skriptu
+      ansible.builtin.file:
+        path: "{{ app_dir }}/scripts/generate_idl.sh"
+        mode: '0755'
+
+    - name: Generovani DDS zdrojovych souboru z IDL
+      ansible.builtin.shell:
+        cmd: ./scripts/generate_idl.sh
+        chdir: "{{ app_dir }}"
+
+    - name: Extrahovani a generovani konfiguracnich souboru z IDL
+      ansible.builtin.command:
+        cmd: python3 scripts/generate_configs.py IDL_FILES/ configs
+        chdir: "{{ app_dir }}"
+        creates: "{{ app_dir }}/configs"
+
+    - name: Konfigurace buildu pomoci CMake
+      ansible.builtin.command:
+        cmd: cmake -S . -B build
+        chdir: "{{ app_dir }}"
+
+    - name: Kompilace aplikace (Publisher / Subscriber)
+      ansible.builtin.command:
+        cmd: cmake --build build
+        chdir: "{{ app_dir }}"
