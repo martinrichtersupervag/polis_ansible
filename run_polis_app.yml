@@ -1,0 +1,65 @@
+---
+- name: Aktualizace spousteciho skriptu a restart Polis DDS kontejneru
+  hosts: ep
+  become: yes
+  vars:
+    app_dir: "/opt/polis-dds-master"
+    
+    # SEM VLOzTE NOVÝ OBSAH VAsEHO SKRIPTU
+    # Znak | na zacatku znamena, ze se zachova viceradkový text
+    novy_obsah_skriptu: |
+      #!/bin/bash
+
+      # Spusteni jednotlivych uzlu na pozadi s cestou ke configu
+      ./build/bin/PolisNode ./configs/Tactical_Sensor_config.json &
+      ./build/bin/PolisNode ./configs/Acoustic_Gunshot_Detection_System_config.json &
+      ./build/bin/PolisNode ./configs/Laser_Range_Finder_config.json &
+      ./build/bin/PolisNode ./configs/Alarms_config.json &
+      ./build/bin/PolisNode ./configs/Arbitration_config.json &
+      ./build/bin/PolisNode ./configs/Brakes_config.json &
+      ./build/bin/PolisNode ./configs/HMI_Input_Devices_config.json &
+      ./build/bin/PolisNode ./configs/HMI_Presentation_config.json &
+      ./build/bin/PolisNode ./configs/Laser_Warning_System_config.json &
+      ./build/bin/PolisNode ./configs/Mount_config.json &
+      ./build/bin/PolisNode ./configs/Navigation_Reference_config.json &
+      ./build/bin/PolisNode ./configs/Power_config.json &
+      ./build/bin/PolisNode ./configs/Routes_config.json &
+      ./build/bin/PolisNode ./configs/Tactical_Effector_config.json &
+      ./build/bin/PolisNode ./configs/Video_config.json &
+      ./build/bin/PolisNode ./configs/Video_Tracking_config.json &
+
+      # Udrz skript (a tim i kontejner) navzdy
+      tail -f /dev/null
+
+  tasks:
+    # =========================================================================
+    # 1. VYPNUTi BeziCiHO KONTEJNERU
+    # =========================================================================
+
+    - name: Zastaveni a odstraneni aktualniho dds-test-nodes kontejneru
+      ansible.builtin.command:
+        cmd: docker rm -f dds-test-nodes
+      failed_when: false
+
+    # =========================================================================
+    # 2. VLOzENi NOVeHO OBSAHU DO SKRIPTU
+    # =========================================================================
+
+    - name: Zapis noveho obsahu do run_test_nodes.sh
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/run_test_nodes.sh"
+        content: "{{ novy_obsah_skriptu }}"
+        mode: '0755'
+
+    # =========================================================================
+    # 3. SESTAVENi A ZNOVUSPUsTeNi
+    # =========================================================================
+
+    - name: Znovu-sestaveni Docker obrazu s novym skriptem
+      ansible.builtin.command:
+        cmd: docker build --network host -t polis-app:latest .
+        chdir: "{{ app_dir }}"
+
+    - name: Spusteni noveho Docker kontejneru se skriptem na hostitelske siti
+      ansible.builtin.command:
+        cmd: docker run -d --name dds-test-nodes --restart always --network host polis-app:latest
