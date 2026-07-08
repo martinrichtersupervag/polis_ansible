@@ -1,5 +1,5 @@
 ---
-- name: Sestaveni aplikace Polis DDS pod rootem
+- name: Sestaveni aplikace Polis DDS a nasazeni do Dockeru s Dozzle
   hosts: ep
   become: yes
   vars:
@@ -12,7 +12,7 @@
         dest: "{{ app_dir }}"
         version: FastDDS
         accept_hostkey: yes
-        force: yes 
+        force: yes
 
     - name: Inicializace a aktualizace submodulu
       ansible.builtin.command:
@@ -45,7 +45,71 @@
         cmd: cmake -S . -B build
         chdir: "{{ app_dir }}"
 
-    - name: Kompilace aplikace (Publisher / Subscriber)
-      ansible.builtin.command:
-        cmd: cmake --build build
+    - name: Kompilace aplikace (Omezeny vykon na 1 jadro kvuli RAM)
+      ansible.builtin.shell:
+        cmd: cmake --build build --clean-first -- -j1
         chdir: "{{ app_dir }}"
+
+    # =========================================================================
+    # DOCKER & DOZZLE NASAZENI
+    # =========================================================================
+
+    - name: Instalace Dockeru do LXC kontejneru
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Nastaveni prav pro spusteni testovaciho skriptu na hostiteli
+      ansible.builtin.file:
+        path: "{{ app_dir }}/run_test_nodes.sh"
+        mode: '0755'
+
+    - name: Priprava knihoven FastDDS do kontextu Dockeru
+      ansible.builtin.shell:
+        cmd: mkdir -p local_libs && cp -RP /usr/local/lib/*Fast* /usr/local/lib/*fast* local_libs/ 2>/dev/null || true
+        chdir: "{{ app_dir }}"
+
+    - name: Vytvoreni Dockerfile s podporou skriptu run_test_nodes.sh
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/Dockerfile"
+        content: |
+          FROM debian:13-slim
+          RUN apt-get update && apt-get install -y \
+              libasio-dev \
+              libtinyxml2-dev \
+              libssl-dev \
+              libpcap-dev \
+              procps \
+              && rm -rf /var/lib/apt/lists/*
+          WORKDIR /app
+          COPY build/bin/PolisNode /app/build/bin/PolisNode
+          COPY configs /app/configs
+          COPY run_test_nodes.sh /app/run_test_nodes.sh
+          COPY local_libs /usr/local/lib/
+          RUN ldconfig
+          RUN chmod +x /app/run_test_nodes.sh
+          ENTRYPOINT ["/bin/bash", "./run_test_nodes.sh"]
+
+    - name: Odstraneni stareho dds-test-nodes kontejneru (pokud existuje)
+      ansible.builtin.command:
+        cmd: docker rm -f dds-test-nodes
+      failed_when: false
+
+    - name: Sestaveni Docker obrazu pro Polis App
+      ansible.builtin.command:
+        cmd: docker build --network host -t polis-app:latest .
+        chdir: "{{ app_dir }}"
+
+    - name: Spusteni Docker kontejneru se skriptem na hostitelske siti
+      ansible.builtin.command:
+        cmd: docker run -d --name dds-test-nodes --restart always --network host polis-app:latest
+
+    - name: Odstraneni stareho dozzle kontejneru (pokud existuje)
+      ansible.builtin.command:
+        cmd: docker rm -f dozzle
+      failed_when: false
+
+    - name: Nastartovani oficialniho Dozzle na portu 8888
+      ansible.builtin.command:
+        cmd: docker run -d --name dozzle --restart always -p 8888:8080 -v /var/run/docker.sock:/var/run/docker.sock amir20/dozzle:latest
