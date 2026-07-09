@@ -1,0 +1,57 @@
+---
+# CAST 1: Spolecna priprava (Instalace systemovych zavislosti)
+- name: Instalace systemovych zavislosti pro RTI
+  hosts: rt
+  tasks:
+    - name: Aktualizace apt a instalace zakladnich balicku
+      apt:
+        name: [curl, wget, build-essential, cmake, unzip, libc6]
+        state: present
+        update_cache: yes
+
+# CAST 2: Konfigurace rticontrol (Po rucni instalaci)
+- name: Konfigurace RTI Connext DDS na rticontrol
+  hosts: rticontrol
+  vars:
+    rti_version: "7.7.0"
+    install_dir: "/opt/rti.com/rti_connext_dds-{{ rti_version }}"
+  tasks:
+    - name: Zkopirovani licence na rticontrol
+      copy:
+        src: "/root/polis_ansible/rti_license.dat"
+        dest: "{{ install_dir }}/rti_license.dat"
+        mode: '0644'
+
+    - name: Nastaveni bashrc pro root na rticontrol
+      blockinfile:
+        path: /root/.bashrc
+        block: |
+          export NDDSHOME="{{ install_dir }}"
+          export RTI_LICENSE_FILE="{{ install_dir }}/rti_license.dat"
+          export PATH="$PATH:$NDDSHOME/bin"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - RTI TOOLS"
+
+# CAST 3: Konfigurace rti1 (Po rucni instalaci)
+- name: Konfigurace RTI Connext DDS na rti1
+  hosts: rti1
+  vars:
+    rti_version: "7.7.0"
+    install_dir: "/opt/rti.com/rti_connext_dds-{{ rti_version }}"
+  tasks:
+    - name: Zkopirovani licence na rti1
+      copy:
+        src: "/root/polis_ansible/rti_license.dat"
+        dest: "{{ install_dir }}/rti_license.dat"
+        mode: '0644'
+
+    - name: Nastaveni bashrc pro rti1 (root i devuser)
+      blockinfile:
+        path: "{{ item }}"
+        block: |
+          export NDDSHOME="{{ install_dir }}"
+          export RTI_LICENSE_FILE="{{ install_dir }}/rti_license.dat"
+          export PATH="$PATH:$NDDSHOME/bin"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - RTI TARGET"
+      loop:
+        - /root/.bashrc
+        - /home/devuser/.bashrc

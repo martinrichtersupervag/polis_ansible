@@ -1,0 +1,7 @@
+all:
+  hosts:
+    rti1:
+      ansible_host: 192.168.0.55
+      ansible_user: root
+      ansible_become: false
+      ansible_python_interpreter: /usr/bin/python3

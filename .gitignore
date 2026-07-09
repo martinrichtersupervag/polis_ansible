@@ -67,3 +67,4 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+rti_connext_dds-7.7.0-lm-x64Linux4gcc8.5.0.run
